@@ -11,7 +11,7 @@ import tqdm
 from src.patch.get_kbs import getAllKbsByMajor
 from src.utils.utils import SymbolManagerException, downloadFileWithProgress
 from src.utils.printer import printError, printInfo, printLog, printSuccess
-from src.utils.settings import getOutputDirectory, isAllowedToDownloadDynamicUpdates, isVerboseMode
+from src.utils.settings import getOutputDirectory, isAllowedToDownloadDynamicUpdates, isVerboseMode, preferOldPatches
 
 
 BASE_URL = 'https://www.catalog.update.microsoft.com/Search.aspx'
@@ -42,10 +42,10 @@ class CatalogPatch:
             self.year = data.group('patch_year')
             self.month = data.group('patch_month')
             self.major = data.group('windows_major')
-            self.minor = data.group('windows_minor') if 'windows_minor' in data.groupdict() else '21H2'
+            self.minor = data.group('windows_minor') if 'windows_minor' in data.groupdict() else ''
             # self.real_minor = data.group('real_minor')
             self.bitness = data.group('windows_bitness')
-            self.dynamic = data.group('dynamic')
+            self.dynamic = data.group('dynamic') if 'dynamic' in data.groupdict() else False
         
         # Microsoft are stupid and sometime write Windows 10 even though it is 11
         if windowsMajor:
@@ -69,18 +69,22 @@ class CatalogPatch:
 
     def getDownloadLink(self, index: int = 0, downloadDialog: str = None) -> str:
         regFileName = r'downloadInformation\[' + str(index) + r"\]\.enTitle\s*=\s*'\s*(?P<patch_year>\d+)-(?P<patch_month>\d+)\s+(((?P<dynamic>(Dynamic)\s+)?Cumulative Update )|((Security|(Preview of))?\s*(\w+\s+)*((Quality\s+)?(Rollup\s+)?)\s*))?(Preview\s+)?for\s+(Microsoft )?(Windows )?(?P<windows_major>\w+)\s+(operating system,? )?(Version (?P<windows_minor>\w+) )?for (?P<windows_bitness>\w+)-based Systems \((?P<kb_id>\w+)\)\s*';"
+        regFileName2 = r'downloadInformation\[' + str(index) + r"\]\.enTitle\s*=\s*'\s*(?P<file_title>(.+))\s+\((?P<kb_id>(KB\d+))\)\s*';"
         nameMatch = re.search(regFileName, downloadDialog if downloadDialog else self.__getDownloadDialog(), re.IGNORECASE | re.MULTILINE)
-        printLog(f'regFileName: {regFileName}')
-        printLog(f'downloadDialog: {downloadDialog}')
         if not nameMatch:
-            raise SymbolManagerException(f'No name found!')
-        self.year = nameMatch.group('patch_year')
-        self.month = nameMatch.group('patch_month')
-        self.dynamic = nameMatch.group('dynamic')
-        if not self.major:
-            self.major = nameMatch.group('windows_major')
-        self.minor = nameMatch.group('windows_minor')
-        self.bitness = nameMatch.group('windows_bitness')
+            nameMatch = re.search(regFileName2, downloadDialog if downloadDialog else self.__getDownloadDialog(), re.IGNORECASE | re.MULTILINE)
+            if not nameMatch:
+                raise SymbolManagerException(f'No name found!')
+            else:
+                self.file_title = nameMatch.group('file_title')
+        else:
+            self.year = nameMatch.group('patch_year')
+            self.month = nameMatch.group('patch_month')
+            self.dynamic = bool(nameMatch.group('dynamic'))
+            if not self.major:
+                self.major = nameMatch.group('windows_major')
+            self.minor = nameMatch.group('windows_minor')
+            self.bitness = nameMatch.group('windows_bitness')
         self.kb = nameMatch.group('kb_id')
 
         reg = r'downloadInformation\[' + str(index) + r"\]\.files\[0\]\.url\s*=\s*'(?P<link>(https?:\/\/catalog\.s\.download\.windowsupdate\.com\/(?P<download_prefix>\w+)\/msdownload\/update\/software\/(?P<updt>(secu|updt))\/(?P<year>\d+)\/(?P<month>\d+)\/windows(?P<major>\w+)\.(?P<real_minor>\w+)-(?P<kb>\w+)-(?P<bitness>\w+)_(?P<download_id>\w+)\.(?P<ext>(cab|msu))))';"
@@ -99,6 +103,7 @@ class CatalogPatch:
                 self.year = match.group('year')
                 self.month = match.group('month')
         else:
+            printInfo('got ver 1 %s %s' % (str(self.data_loaded), str(match.group('year'))))
             self.download_prefix = match.group('download_prefix')
             self.download_link = match.group('link')
             if self.data_loaded:
@@ -181,17 +186,21 @@ class PatchDownloader:
     def generatePatchDownloadUrls(self):
         reg1 = r'<a\s+id=\'\w+-\w+-\w+-\w+-\w+_link\'\s+href=\s*"javascript:void\(0\);"\s*onclick=\'goToDetails\("(?P<link_id>(\w+-\w+-\w+-\w+-\w+))"\);\'\s+class="contentTextItemSpacerNoBreakLink">\s*(?P<patch_full_name>((?P<patch_year>\d+)-(?P<patch_month>\d+)\s+(((?P<dynamic>(Dynamic)\s+)?Cumulative Update )|((Security|(Preview of ))?\*(Monthly|Only) Quality Rollup ))(Preview )?for (Microsoft )?(Windows )?(?P<windows_major>\w+) (operating system,? )?(Version (?P<windows_minor>\w+) )?for (?P<windows_bitness>\w+)-based Systems \((?P<kb_id>\w+)\)))\s*<\/a>'
         reg2 = r'<a\s+id=\'\w+-\w+-\w+-\w+-\w+_link\'\s+href=\s*"javascript:void\(0\);"\s*onclick=\'goToDetails\("(?P<link_id>(\w+-\w+-\w+-\w+-\w+))"\);\'\s+class="contentTextItemSpacerNoBreakLink">\s*(?P<patch_full_name>((?P<patch_year>\d+)-(?P<patch_month>\d+)\s+(((?P<dynamic>(Dynamic)\s+)?Cumulative Update )|((Security|(Preview of ))?\s*(Monthly|Only)?\s*Quality Rollup ))?(Preview )?for (Microsoft )?(Windows )?(?P<windows_major>\w+) (operating system,? )?(Version (?P<windows_minor>\w+) )?for (?P<windows_bitness>\w+)-based Systems \((?P<kb_id>\w+)\)))\s*<\/a>'
+        reg3 = r'<a\s+id=\'\w+-\w+-\w+-\w+-\w+_link\'\s+href=\s*"javascript:void\(0\);"\s*onclick=\'goToDetails\("(?P<link_id>(\w+-\w+-\w+-\w+-\w+))"\);\'\s+class="contentTextItemSpacerNoBreakLink">\s*(?P<patch_full_name>(((?P<patch_year>\d+)-(?P<patch_month>\d+))?(\w+\s+)*Update\s+for\s+(Microsoft\s+)?Windows\s+(?P<windows_major>((\w+\s+?)|((Server\s+\d+\s+(\w+\s+)?))))(\s+operating system,?\s+)?\s*?(\s*?for\s+?(?P<windows_bitness>\w+?)-based\s+Systems\s*?)?\s+\((?P<kb_id>\w+?)\)))\s*<\/a>'
+        reg4 = r'<a\s+id=\'\w+-\w+-\w+-\w+-\w+_link\'\s+href=\s*"javascript:void\(0\);"\s*onclick=\'goToDetails\("(?P<link_id>(\w+-\w+-\w+-\w+-\w+))"\);\'\s+class="contentTextItemSpacerNoBreakLink">\s*(?P<patch_full_name>(((?P<patch_year>\d+)-(?P<patch_month>\d+))?Update\s+for\s+Windows\s+(?P<windows_major>\d+)\s+(for\s+(?P<windows_bitness>(x\d\d))-based\s+Systems\s+)?\((?P<kb_id>(KB\d+))\)))\s*<\/a>'
         # 	Security Monthly Quality Rollup for Windows 7 for x64-based Systems (KB5021291)
         # reg_loose = r'<a\s+id=\'\w+-\w+-\w+-\w+-\w+_link\'\s+href=\s*"javascript:void\(0\);"\s*onclick=\'goToDetails\("(?P<link_id>(\w+-\w+-\w+-\w+-\w+))"\);\'\s+class="contentTextItemSpacerNoBreakLink">\s*(?P<patch_year>\d+)-(?P<patch_month>\d+)\s+(?P<dynamic>(Dynamic)\s+)?Cumulative Update (Preview )?for (Microsoft )?Windows (?P<windows_major>\w+) (Version (?P<windows_minor>\w+) )?for (?P<windows_bitness>\w+)-based Systems \((?P<kb_id>\w+)\)\s*<\/a>'
         # reg2 = r'<a\s+id=\'\w+-\w+-\w+-\w+-\w+_link\'\s+href=\s*"javascript:void\(0\);"\s*onclick=\'goToDetails\("(?P<link_id>(\w+-\w+-\w+-\w+-\w+))"\);\'\s+class="contentTextItemSpacerNoBreakLink">\s*(?P<patch_year>\d+)-(?P<patch_month>\d+)\s+(?P<dynamic>(Dynamic)\s+)?Cumulative Update (Preview )?for Windows (?P<windows_major>\w+) for (?P<windows_bitness>\w+)-based Systems \((?P<kb_id>\w+)\)\s*<\/a>'
-        for reg in (reg1, reg2, ):
+        for reg in (reg1, reg2, reg3, reg4, ):
             for link in re.finditer(reg, self.data, re.IGNORECASE | re.MULTILINE):
                 patch_full_name = link.group('patch_full_name')
-                if not isAllowedToDownloadDynamicUpdates() and link.group('dynamic'):
-                    printLog(f'Skipping "{patch_full_name}" (see --allow-dynamic)')
-                    continue
+                if 'dynamic' in link.groups():
+                    if not isAllowedToDownloadDynamicUpdates() and link.group('dynamic'):
+                        printLog(f'Skipping "{patch_full_name}" (see --allow-dynamic)')
+                        continue
                 printInfo(f'Parsing catalog entry "{patch_full_name}"')
                 catalogPatch = CatalogPatch(link, windowsMajor=self.windowsMajor)
+                printInfo(str(catalogPatch.link_id))
                 if self.isValidBitness(catalogPatch.bitness):
                     yield catalogPatch
 
@@ -204,16 +213,25 @@ class PatchDownloader:
             printLog(f"Found update id {update_id['updateID']} for {catalog.getDownloadName()}")
             update_ids.append(update_id)
             kbs[catalog.kb.lower()] = catalog
-        req = requests.post('https://www.catalog.update.microsoft.com/DownloadDialog.aspx', data = {
-            'updateIDs': json.dumps(update_ids)
-        }) # 
+            
         for index, update_id in enumerate(update_ids):
+            req = requests.post('https://www.catalog.update.microsoft.com/DownloadDialog.aspx', data = {
+                'updateIDs': json.dumps([update_id])
+            } ) # , proxies=PROXIES, verify=False
             try:
                 catalog = CatalogPatch(None)
                 catalog.getDownloadLink(index, req.text)
                 catalog.minor = kbs[catalog.kb.lower()].minor
-                catalog.year = kbs[catalog.kb.lower()].year
-                catalog.month = kbs[catalog.kb.lower()].month
+                if kbs[catalog.kb.lower()].year:
+                    catalog.year = kbs[catalog.kb.lower()].year
+                if kbs[catalog.kb.lower()].month:
+                    catalog.month = kbs[catalog.kb.lower()].month
+                if str(catalog.major) == '6' and str(catalog.real_minor) == '1':
+                    catalog.major = '7'
+                if str(catalog.major) == '6' and str(catalog.real_minor) == '2':
+                    catalog.major = '8'
+                if str(catalog.major) == '6' and str(catalog.real_minor) == '3':
+                    catalog.major = '8.1'
                 if os.path.exists(os.path.join(outputDirectory, catalog.getDownloadName())):
                     continue
                 downloadedPatchName = os.path.join(outputDirectory, catalog.getDownloadName())
@@ -234,7 +252,7 @@ def downloadPatches(major: str, minor: str, bitness: str, outputDirectory: str):
             patch_downloader.bulkDownload(outputDirectory)
 
 
-def bootlegDownloadKB(kb: str) -> bytes:
+def bootlegDownloadKB(kb: str) -> None:
     query_url = f'{BASE_URL}?q={urllib.parse.quote(kb)}'
     with requests.session() as session:
         data = session.get(query_url).text
@@ -293,12 +311,14 @@ def downloadPatchesByKb(major: str, outputDirectory: str, kb_number: str = ''):
         except SymbolManagerException as ex:
             printError(f'PatchDownloader failed on {kb_number}: {ex}')
     else:
-        kbs = getAllKbsByMajor(major)
+        raw_kbs = getAllKbsByMajor(major)
+        kbs = list(raw_kbs)
+        kbs = sorted(kbs, key=lambda x: x.kb, reverse=not preferOldPatches())
         for kb in tqdm.tqdm(kbs):
             try:
-                if major in ['7', '8', '8.1']:
-                    bootlegDownloadKB(kb.kb)
-                    continue
+                # if major in ['7', '8', '8.1']:
+                #     bootlegDownloadKB(kb.kb)
+                #     continue
                 patch_downloader = PatchDownloader(query=kb.kb, bitness=['x64', 'x86'], windowsMajor=major)
                 patch_downloader.bulkDownload(outputDirectory)
             except SymbolManagerException as ex:

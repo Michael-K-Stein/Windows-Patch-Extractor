@@ -11,6 +11,7 @@ class Settings:
     s_keep_tmp_files = False
     s_verbose = False
     s_allowed_to_download_dynamic_updates = False
+    s_download_old_updates_first = False
 
 g_settings = Settings()
 
@@ -56,6 +57,14 @@ def setDownloadSettingsAllowDynamic(mode: bool = True):
     getSettings().s_allowed_to_download_dynamic_updates = mode
 
 
+
+def preferOldPatches()->bool:
+    return getSettings().s_download_old_updates_first
+
+def setDownloadSettingsPreferOld(mode: bool = True):
+    getSettings().s_download_old_updates_first = mode
+
+
 def getInterestingFiles() -> List[str]:
     return [
         '*ntos*.exe', '*ntdll*.dll', '*ntos*.sys', 
@@ -67,7 +76,7 @@ def getInterestingFiles() -> List[str]:
         '*msvcp_win.dll', '*OLEAUT32.dll', 
         '*clfs.sys',
 
-        # '*ntdll*.dll'
+        # '*jscript.dll'
         ]
 
 

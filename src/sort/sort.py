@@ -2,8 +2,9 @@ import os
 import re
 import shutil
 from types import NoneType
+from src.patch.extract_msu import getMsuMetadata
 from src.patch.delta_patch import patchFile
-from src.utils.printer import printError, printLog, printSuccess
+from src.utils.printer import printError, printInfo, printLog, printSuccess
 from src.utils.smart_exe import buildVersionedFileName, getBinaryFileNameWithVersion, getFileProperties
 from src.utils.utils import SymbolManagerException, normalizeDirtyBitness, setOutputDirectory, walkFiles
 from src.utils.settings import getOutputDirectory
@@ -17,9 +18,10 @@ def deleteEmptyDirTree(leaf: str) -> NoneType:
 # 11\Windows\WinSxS\amd64_microsoft-windows-os-kernel_31bf3856ad364e35_10.0.22000.194_none_674de4333985bb23\r\ntoskrnl.exe
 
 
-def sortBinaries(root_dir: str, output_dir: str, file_name_regex: re.Pattern[str] = r'.*\.((exe)|(dll)|(sys))$', move_files: bool = False, recursive: bool = True):
+def sortBinaries(root_dir: str, output_dir: str, file_name_regex: re.Pattern[str] | str = r'.*\.((exe)|(dll)|(sys)|(blob))$', move_files: bool = False, recursive: bool = True):
     if not file_name_regex:
-        file_name_regex = r'.*\.((exe)|(dll)|(sys))$'
+        file_name_regex = r'.*\.((exe)|(dll)|(sys)|(blob))$'
+
     def renameBinary(root: str, binary_path: str):
         try:
             path = os.path.join(root, binary_path)
@@ -37,11 +39,13 @@ def sortBinaries(root_dir: str, output_dir: str, file_name_regex: re.Pattern[str
             printSuccess(f'Processed "{fixed_file_name}"')
         except SymbolManagerException as ex:
             printError(f'Error parsing file: {ex}')
+
     def extrapolateWinSxS(root: str, binary_path: str):
         try:
             path = os.path.join(root, binary_path)
             # 10.0.22000.194
-            reg = re.search(r'WinSxS\\(?P<arch>\w+)_microsoft-windows-.*_\w+_(?P<full_version>((?P<win_maj>\d+)\.(?P<win_min>\d+)\.(?P<major>\d+)\.(?P<minor>\d+))).*\\r\\(?P<file_name>(\w+\.\w+))$', path)
+            reg = re.search(
+                r'WinSxS\\(?P<arch>\w+)_microsoft-windows-.*_\w+_(?P<full_version>((?P<win_maj>\d+)\.(?P<win_min>\d+)\.(?P<major>\d+)\.(?P<minor>\d+))).*\\r\\(?P<file_name>(\w+\.\w+))$', path)
             if not reg:
                 return
             file_name = reg.group('file_name')
@@ -53,10 +57,13 @@ def sortBinaries(root_dir: str, output_dir: str, file_name_regex: re.Pattern[str
             arch = reg.group('arch')
             arch = normalizeDirtyBitness(arch)
             base_name, ext = os.path.splitext(file_name)
-            base_file = os.path.join(getOutputDirectory(), buildVersionedFileName(base_name, full_version, arch, ext))
+            base_file = os.path.join(getOutputDirectory(), buildVersionedFileName(
+                base_name, full_version, arch, ext))
             new_version = f'{win_maj}.{win_min}.{major}.1'
-            target_file = buildVersionedFileName(base_name, new_version, arch, ext)
-            patchFile(base_file, os.path.join(getOutputDirectory(), target_file), path, allow_legacy=True)
+            target_file = buildVersionedFileName(
+                base_name, new_version, arch, ext)
+            patchFile(base_file, os.path.join(getOutputDirectory(),
+                      target_file), path, allow_legacy=True)
             printSuccess(f'Built {target_file} from {path}')
             if move_files:
                 os.remove(path)
@@ -65,3 +72,31 @@ def sortBinaries(root_dir: str, output_dir: str, file_name_regex: re.Pattern[str
             printError(f'Error parsing file: {ex}')
     walkFiles(root_dir, renameBinary, file_name_regex, recursive)
     walkFiles(root_dir, extrapolateWinSxS, file_name_regex, recursive)
+
+
+def sortMsuAndCabFiles(root_dir: str, output_dir: str, file_name_regex: re.Pattern[str] | str = r'.*\.((msu)|(cab))$', move_files: bool = False, recursive: bool = True):
+    if not file_name_regex:
+        file_name_regex = r'.*\.((msu)|(cab))$'
+
+    def sortMsuOrCabFile(root: str, file_path: str):
+        path = os.path.join(root, file_path)
+        try:
+            metadata = getMsuMetadata(path)
+            ext = os.path.splitext(file_path)[1]
+            new_file_name = f'Windows {metadata.build} {normalizeDirtyBitness(
+                metadata.arch)} - {metadata.kb.upper()} - {metadata.date.strftime('%Y-%m')}{ext}'
+            printInfo(f'{file_path} => {new_file_name}')
+            out_path = os.path.join(output_dir, new_file_name)
+            if move_files:
+                if not os.path.exists(out_path):
+                    shutil.move(path, out_path)
+                else:
+                    os.remove(path)
+                d = os.path.split(path)[0]
+                deleteEmptyDirTree(d)
+            else:
+                shutil.copy2(path, out_path)
+        except SymbolManagerException as ex:
+            printError(f'Failed sorting file {file_path} : {str(ex)}')
+
+    walkFiles(root_dir, sortMsuOrCabFile, file_name_regex, recursive)

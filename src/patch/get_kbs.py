@@ -32,7 +32,7 @@ def getAllKbs(versionHistoryLink: WindowsVersionHistoryLink) -> Set[PatchKB]:
         raise SymbolManagerException(f'Failed to query WindowsVersionHistoryLink {versionHistoryLink} !')
     content = req.text
 
-    reg = re.compile(r'<a\s+class="supLeftNavLink"\s+data-bi-slot="\d+"\s+href="\/en-us\/help\/\d+">\w+\s+\d+,\s+\d+(&#x\d+)?;(?P<kb>(KB\d+))\s+\(OS\s+Build\s+(?P<major>\d+)\.(?P<patch>\d+)\)(\s+.*)?<\/a>', re.IGNORECASE | re.UNICODE | re.MULTILINE)
+    reg = re.compile(r'<a\s+class="supLeftNavLink"\s+data-bi-slot="\d+"\s+href="\/en-us\/help\/\d+">\w+\s+\d+,\s+\d+(&#x\d+)?;(?P<kb>(KB\d+))(\s+\(((OS\s+Build\s+(?P<major>\d+)\.(?P<patch>\d+)))|(.+?\s+((Rollup)|Update))\)(\s+.*)?)?<\/a>', re.IGNORECASE | re.UNICODE | re.MULTILINE)
     matches = reg.finditer(content)
 
     kbs : Set[PatchKB] = set()

@@ -104,7 +104,9 @@ def createBaseFileFromReverse(base_files_dir: str, base_file_name: str, extensio
     
     if not at_least_one_file_found:
         printLog(f'No files matched "{file_name_regex}" to create reverse base!')
-    return False
+        return False
+
+    return True
 
 
 def doPatchOrCreateBase(base_files_dir: str, base_file_name: str, extension: str, target_version: str, base_version: str, bitness: str, kb: str, patch_direction: str, patch_file: str):
@@ -133,7 +135,10 @@ def doPatchOrCreateBase(base_files_dir: str, base_file_name: str, extension: str
         printLog(f'Skipping {target_versioned_name}')
         return
 
-    patchFile(base_file, os.path.join(getOutputDirectory(), target_versioned_name), patch_file, allow_legacy=True)
+    if patch_direction == 'n':
+        patchFile(None, os.path.join(getOutputDirectory(), target_versioned_name), patch_file, allow_legacy=True)
+    else:
+        patchFile(base_file, os.path.join(getOutputDirectory(), target_versioned_name), patch_file, allow_legacy=True)
     printSuccess(f'Built patched file {target_versioned_name}')
 
 
@@ -141,6 +146,7 @@ def extrapolateMsuFile(msu_file, args):
     regex_name = args.name
     if not regex_name:
         regex_name = getInterestingFilesAsRegex()
+    printLog(f'Extracting files matching "{regex_name}"')
     with TmpDir() as patch_files_dir:
         r = extractMsu(msu_file, regex_name, patch_files_dir, silent=True)
         if r[0] == MsuVersion.WinServer:
@@ -264,7 +270,7 @@ def handleExtrapolateMsu(args):
                 if reg and not args.force:
                     # Check if we have already extracted this file
                     kkk = reg.group('kb')
-                    if re.search(r'clfs.*\s+' + kkk + r'.*\.sys$', existing_files, re.I | re.M):
+                    if re.search(r'jscript.*\s+' + kkk + r'.*\.dll$', existing_files, re.I | re.M):
                         printLog(f'Skipping already extracted patch file {msu}')
                         return
                 extrapolateMsuFile(msu, args)

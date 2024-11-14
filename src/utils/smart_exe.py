@@ -136,6 +136,8 @@ class SmartExe:
 
 def buildVersionedFileName(file_base_name: str, raw_version: str, architecture: str, file_extension: str, kb: str = None) -> str:
     architecture = normalizeDirtyBitness(architecture)
+    if file_base_name == 'ntkrnlmp':
+        file_base_name = 'ntoskrnl'
     if not kb:
         return f'{file_base_name} - {raw_version} {architecture}{file_extension}'
     else:
@@ -143,17 +145,17 @@ def buildVersionedFileName(file_base_name: str, raw_version: str, architecture: 
 
 
 def getBinaryFileNameWithVersion(binary_file_path: str) -> str:
-    ext = os.path.splitext(binary_file_path)[1]
-    properties = getFileProperties(binary_file_path, version_only=True)
+    properties = getFileProperties(binary_file_path, version_only=False)
 
+    bin_original_name = binary_file_path
     # Legacy, uses the real file name (from factory, like ntkrnlmp.exe)
-    if 0:
+    if re.match(r'.*(\/|\\)\w+\.blob', binary_file_path, re.I):
         if properties.original_name and re.match(r'^\w+\.\w+$', properties.original_name.strip()):
             bin_original_name = properties.original_name
         else:
             bin_original_name = binary_file_path
     
-    bin_original_name = binary_file_path
+    ext = os.path.splitext(bin_original_name)[1]
     bin_original_name = os.path.splitext(os.path.basename(bin_original_name))[0].split()[0].split('_')[0]
     file_data = dumpBinaryFileData(binary_file_path)
     arch = file_data.bitness
